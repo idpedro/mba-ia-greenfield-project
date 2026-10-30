@@ -43,11 +43,11 @@ O projeto é um monorepo baseado em containers Docker. Cada subprojeto sobe sua 
 
 - **Frontend** (Next.js 16, App Router + React Server Components) — interface da plataforma. Segue o **modelo BFF**: o navegador nunca chama a API NestJS diretamente; todo tráfego passa por Route Handlers same-origin em `app/api/**`, que fazem proxy server-side para a API.
 - **API** (NestJS 11) — regras de negócio, autenticação (JWT + refresh token rotation), envio de e-mails e acesso ao banco.
-- **Database** (PostgreSQL 17) — usuários, canais e tokens de autenticação.
+- **Database** (PostgreSQL 17) — usuários, canais, tokens de autenticação e vídeos.
 - **Email Service** (Mailpit) — captura os e-mails transacionais (confirmação de conta e recuperação de senha) em uma UI local.
-- **Video Worker** (FFmpeg) — processamento de vídeos *(planejado — Fase 03)*.
-- **Object Storage** (S3/MinIO) — arquivos de vídeo e thumbnails *(planejado — Fase 03)*.
-- **Message Queue** — fila de processamento de vídeos *(planejado — Fase 03)*.
+- **Video Worker** (NestJS + FFmpeg) — segundo processo Nest (`src/worker.ts`, serviço `video-worker`), sem HTTP: consome a fila, extrai metadados com ffprobe, gera a thumbnail com ffmpeg e atualiza o status do vídeo.
+- **Object Storage** (S3-compatível) — arquivos de vídeo e thumbnails. Localmente roda **RustFS** (`rustfs/rustfs:1.0.4`); em produção, S3. O navegador envia e baixa os bytes direto do storage via URLs pré-assinadas — nenhum byte de vídeo passa pela API.
+- **Message Queue** (BullMQ + Redis) — fila `video-processing` (job `process-video`) e fila `video-maintenance` (varredura horária de uploads abandonados).
 
 O diagrama de arquitetura completo (C4) está em `docs/diagrams/software-arch.mermaid`.
 
@@ -55,12 +55,15 @@ O diagrama de arquitetura completo (C4) está em `docs/diagrams/software-arch.me
 
 Os dois subprojetos têm stacks Docker **separadas**. Suba primeiro o backend, rode as migrations e depois o frontend.
 
-### 1. Backend (NestJS + PostgreSQL + Mailpit)
+### 1. Backend (NestJS + PostgreSQL + Mailpit + Redis + RustFS + worker de vídeo)
 
 ```bash
 cd nestjs-project
 
-# Sobe API, banco e Mailpit
+# Crie o .env a partir do exemplo (inclui as variáveis S3_* e REDIS_*)
+cp .env.example .env
+
+# Sobe API, banco, Mailpit, Redis, RustFS e o worker de vídeo
 docker compose up -d
 
 # Instala dependências (apenas na primeira vez)
@@ -80,7 +83,14 @@ Serviços disponíveis:
 | API NestJS | http://localhost:3000 |
 | PostgreSQL | `localhost:5432` (db/user/senha: `streamtube`) |
 | Mailpit (UI de e-mails) | http://localhost:8025 |
+| RustFS (API S3) | http://localhost:9000 — o bucket, o CORS e a regra de lifecycle são criados no boot da API |
+| Redis | interno (`redis:6379`), sem porta publicada |
+| Worker de vídeo | sem porta — acompanhe com `docker compose logs -f video-worker` |
 | Swagger (opcional) | http://localhost:3000/api/docs — habilite com `SWAGGER_ENABLED=true` |
+
+> Se alguma porta padrão já estiver ocupada na sua máquina, mude o lado do host no `.env` (`API_HOST_PORT`, `DB_HOST_PORT`, `MAIL_SMTP_HOST_PORT`, `MAIL_UI_HOST_PORT`, `S3_HOST_PORT`). Ao mudar `S3_HOST_PORT`, ajuste também `S3_PUBLIC_ENDPOINT` para a mesma porta.
+
+O fluxo completo de upload → processamento → streaming está roteirizado em `nestjs-project/api.http` (requisições 10–17).
 
 ### 2. Frontend (Next.js)
 
@@ -110,7 +120,7 @@ docker compose exec nestjs-api npm run test:e2e       # end-to-end (HTTP via sup
 docker compose exec nestjs-api npm run test:cov       # cobertura
 ```
 
-Sufixos: `*.spec.ts` (unitário), `*.integration-spec.ts` (integração com banco real), `*.e2e-spec.ts` (end-to-end). Testes de integração/e2e rodam com `--runInBand`.
+Sufixos: `*.spec.ts` (unitário), `*.integration-spec.ts` (integração com banco real), `*.e2e-spec.ts` (end-to-end). Testes de integração/e2e rodam com `--runInBand`. Os testes de vídeo usam a infra real do Compose (RustFS, Redis e FFmpeg), então os serviços precisam estar de pé.
 
 ### Frontend (Vitest + Playwright)
 
@@ -124,7 +134,7 @@ Sufixos: `*.test.ts(x)` (unitário), `*.integration.test.ts(x)` (Route Handlers 
 
 ## ✅ Funcionalidades implementadas
 
-**Fase 01 — Configuração base** e **Fase 02 — Autenticação** estão concluídas (backend + frontend).
+**Fase 01 — Configuração base** e **Fase 02 — Autenticação** estão concluídas (backend + frontend). **Fase 03 — Upload e processamento de vídeos** está concluída no backend.
 
 ### Autenticação (Fase 02)
 
@@ -151,6 +161,24 @@ Telas e Route Handlers BFF (`next-frontend`):
 
 Segurança: senhas com **Argon2**, **JWT** com `JwtAuthGuard` global (opt-out via `@Public()`), **rotação de refresh token** com detecção de reuso, **rate limiting** (`ThrottlerGuard`) nos endpoints de auth, e sessão no navegador via **iron-session** (cookies HTTP-only).
 
+### Upload e processamento de vídeos (Fase 03)
+
+Upload de vídeos de até **10 GB** direto para o object storage (multipart com URLs pré-assinadas, partes de 64 MiB, retomável), com **pré-cadastro do vídeo como rascunho** ao iniciar. Ao concluir o upload, o vídeo entra na fila e o worker extrai duração/metadados e gera a thumbnail. Cada vídeo tem uma **URL única** (slug base64url de 11 caracteres), e a reprodução/download são redirecionamentos para o storage, com suporte a Range (streaming sem baixar o arquivo inteiro).
+
+Endpoints da API (todos autenticados e restritos ao dono do vídeo nesta fase):
+
+| Método & Rota | Descrição |
+|---------------|-----------|
+| `POST /videos` | Cria o rascunho e abre o upload multipart (retorna o plano de partes) |
+| `POST /videos/:id/upload/part-urls` | URLs pré-assinadas (1h) para enviar as partes direto ao storage |
+| `GET /videos/:id/upload/parts` | Partes já enviadas (retomada do upload) |
+| `POST /videos/:id/upload/complete` | Conclui o upload, confere o tamanho e enfileira o processamento |
+| `GET /videos/:slug` | Detalhe, status, metadados e URL da thumbnail |
+| `GET /videos/:slug/stream` | `302` para o vídeo no storage (streaming com Range/206) |
+| `GET /videos/:slug/download` | `302` para o download do arquivo original |
+
+Ciclo de status: `pending_upload` → `processing` → `ready` ou `failed` (`size_mismatch`, `invalid_media`, `processing_error`, ou `upload_expired` para uploads abandonados há mais de 24h). Formatos aceitos: MP4, WebM, QuickTime e Matroska.
+
 ## 🛠️ Estrutura do Projeto
 
 ```
@@ -160,7 +188,8 @@ green-field-ia-project/
 │   ├── phases/                          # Planos e implementação por fase
 │   │   ├── phase-01-configuracao-base/
 │   │   ├── phase-02-auth/               # Auth (backend)
-│   │   └── phase-02-auth-frontend/      # Auth (frontend)
+│   │   ├── phase-02-auth-frontend/      # Auth (frontend)
+│   │   └── phase-03-videos/             # Upload e processamento de vídeos
 │   └── diagrams/
 │       └── software-arch.mermaid        # Diagrama de arquitetura (C4)
 ├── nestjs-project/                      # Backend API (NestJS 11)
@@ -169,11 +198,16 @@ green-field-ia-project/
 │   │   ├── users/                       # Entidade e serviço de usuários
 │   │   ├── channels/                    # Canal 1:1 por usuário (nickname do e-mail)
 │   │   ├── mail/                        # Envio de e-mails (templates Handlebars)
+│   │   ├── videos/                      # Upload, detalhe, streaming e download de vídeos
+│   │   ├── video-processing/            # Worker: processamento (ffprobe/ffmpeg) e varredura de uploads
+│   │   ├── storage/                     # Clientes S3 (interno/público) e bootstrap do bucket
+│   │   ├── queue/                       # Conexão BullMQ (Redis)
+│   │   ├── worker.ts                    # Entrypoint do worker de vídeo
 │   │   ├── common/                      # Filtros, pipes e exceptions de domínio
 │   │   ├── config/                      # Configs namespaced (Joi)
 │   │   └── database/                    # data-source, migrations e seeds
 │   ├── test/                            # Testes e2e
-│   ├── compose.yaml                     # Docker Compose (API + PostgreSQL + Mailpit)
+│   ├── compose.yaml                     # Docker Compose (API, PostgreSQL, Mailpit, Redis, RustFS, worker)
 │   └── Dockerfile.dev
 ├── next-frontend/                       # Frontend (Next.js 16, App Router)
 │   ├── app/                             # Rotas, layouts, páginas e Route Handlers BFF
@@ -195,7 +229,7 @@ green-field-ia-project/
 |------|-----------|--------|
 | **01** | Configuração Base do Projeto | ✅ Concluída |
 | **02** | Cadastro, Login e Gerenciamento de Conta | ✅ Concluída |
-| **03** | Upload e Processamento de Vídeos | ⏳ Planejada |
+| **03** | Upload e Processamento de Vídeos | ✅ Concluída (backend) |
 | **04** | Gerenciamento de Vídeos e Canal | ⏳ Planejada |
 | **05** | Página de Visualização do Vídeo | ⏳ Planejada |
 | **06** | Interações Sociais (Likes, Comentários, Inscrições) | ⏳ Planejada |
@@ -209,6 +243,7 @@ Detalhes completos em `docs/project-plan.md`.
 |--------|------------|
 | Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS 4, shadcn/ui, React Hook Form + Zod, iron-session, openapi-fetch |
 | Backend | NestJS 11, TypeScript, TypeORM, JWT, Argon2, Mailer (Handlebars) |
+| Vídeo | BullMQ + Redis (fila), RustFS / S3 via AWS SDK v3 (storage), FFmpeg (worker) |
 | Banco de Dados | PostgreSQL 17 |
 | E-mail (dev) | Mailpit |
 | Containerização | Docker, Docker Compose |
