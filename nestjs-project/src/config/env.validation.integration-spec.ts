@@ -1,4 +1,10 @@
+import type { ValidationError } from 'joi';
 import { envValidationSchema } from './env.validation';
+
+interface EnvValidationResult {
+  error?: ValidationError;
+  value: { SWAGGER_ENABLED: string };
+}
 
 const requiredEnv = {
   DB_USERNAME: 'user',
@@ -12,7 +18,7 @@ const validate = (env: Record<string, string>) =>
   envValidationSchema.validate(
     { ...requiredEnv, ...env },
     { allowUnknown: true, abortEarly: false },
-  );
+  ) as EnvValidationResult;
 
 describe('envValidationSchema — SWAGGER_ENABLED', () => {
   it('should reject SWAGGER_ENABLED with an invalid value', () => {
