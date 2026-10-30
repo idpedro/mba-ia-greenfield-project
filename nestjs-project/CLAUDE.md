@@ -139,7 +139,7 @@ Conventions for **how to write** each kind of test (mocking patterns, AAA struct
 
 These settings are required in `package.json` (jest config) and `test/jest-e2e.json` for the project's tests to work correctly:
 
-- `setupFiles: ["dotenv/config"]` — without this, `.env` is not loaded inside the Jest process. `DB_HOST`, `JWT_SECRET`, etc. fall back to undefined or to the host's `localhost`, breaking container-to-container DNS.
+- `setupFiles: ["<setup-test-env>", "dotenv/config"]` — `dotenv/config` loads `.env` inside the Jest process; without it `DB_HOST`, `JWT_SECRET`, etc. fall back to undefined or to the host's `localhost`, breaking container-to-container DNS. `src/test/setup-test-env.ts` runs **first** and sets `S3_PUBLIC_ENDPOINT=http://rustfs:9000` (dotenv never overrides an existing variable): presigned URLs sign the host (SigV4), so tests must get URLs the container can reach and must never rewrite their host. Path is `<rootDir>/test/setup-test-env.ts` in `package.json` (rootDir `src`) and `<rootDir>/../src/test/setup-test-env.ts` in `test/jest-e2e.json` (rootDir `test`).
 - `testRegex: '.*\\.(spec|integration-spec)\\.ts$'` — covers both unit (`*.spec.ts`) and integration (`*.integration-spec.ts`) suffixes.
 
 Do not add new test-file suffixes; if a new test type is needed, update the regex deliberately.
@@ -168,6 +168,38 @@ NestJS with standard module structure. Source lives in `src/`, compiled output i
 
 - Each domain feature gets its own module (e.g., `UsersModule`, `VideosModule`) registered in `AppModule`
 - Controllers handle HTTP routing; Services hold business logic; both are scoped to their module
+
+## Videos (upload, processing, streaming)
+
+Bytes never pass through the API: the browser uploads parts straight to object storage with presigned multipart URLs, and playback/download are `302` redirects to presigned GETs.
+
+**Modules** (import other modules only through their `index.ts` — ESLint `no-restricted-imports` forbids deep imports into `src/storage/*` and `src/video-processing/*`):
+
+- `src/videos/` — `VideosModule` (API only): `VideosController`, `VideoUploadService` (initiate / sign part URLs / list parts / complete + enqueue), `VideosService` (owner-scoped lookups), `VideoDeliveryService` (stream/download URLs), `VideoPresenter`, entity `entities/video.entity.ts`, `upload-limits.ts`, `video.exceptions.ts`
+- `src/storage/` — `StorageModule`: two `S3Client`s (`S3_INTERNAL_CLIENT` → `S3_ENDPOINT` for server-side calls, `S3_PUBLIC_CLIENT` → `S3_PUBLIC_ENDPOINT` for URLs handed to clients), `StorageService`, `StorageBootstrapService` (creates the bucket, CORS and the 2-day `AbortIncompleteMultipartUpload` lifecycle rule on boot). Both clients use `requestChecksumCalculation/responseChecksumValidation: 'WHEN_REQUIRED'` — RustFS rejects SDK-default checksums on presigned part PUTs
+- `src/video-processing/` — `VideoProcessingModule` (worker only): `VideoProcessingProcessor` (`process-video`), `StaleUploadSweepProcessor` + `StaleUploadSweepScheduler` (`expire-stale-uploads`), `ffmpeg/FfmpegService` (`execFile` wrappers for ffprobe/ffmpeg); queue/job names in `video-processing.constants.ts`
+- `src/queue/` (`QueueModule`, BullMQ root connection), `src/database/` (`DatabaseModule`, shared by API and worker)
+- `src/worker.ts` + `src/worker.module.ts` — worker entrypoint (`npm run start:worker:dev`), no HTTP; the API (`AppModule`) only produces jobs
+
+**Endpoints** (all require auth and are owner-only; another channel's video returns `404 VIDEO_NOT_FOUND`):
+
+| Route | Purpose |
+|---|---|
+| `POST /videos` | Creates the draft (`pending_upload`), opens the multipart upload, returns the upload plan (64 MiB parts) |
+| `POST /videos/:id/upload/part-urls` | Presigned `UploadPart` URLs (1h) for up to 100 part numbers |
+| `GET /videos/:id/upload/parts` | Parts already uploaded (resume) |
+| `POST /videos/:id/upload/complete` | Completes the upload, checks the size, sets `processing`, enqueues `process-video` (`jobId = videoId`) |
+| `GET /videos/:slug` | Detail + status + metadata + presigned `thumbnail_url` |
+| `GET /videos/:slug/stream` | `302` to a presigned GET (Range/206 handled by storage), `Cache-Control: no-store` |
+| `GET /videos/:slug/download` | Same, with `Content-Disposition: attachment` (RFC 5987 filename) |
+
+Limits: 10 GiB max, MIME `video/mp4`, `video/webm`, `video/quicktime`, `video/x-matroska`. Slug: 11-char base64url, unique. The full flow is scripted in `api.http` (requests 10–17).
+
+**Status lifecycle** (`processing_status`; `publication_status` is always `draft` in this phase): `pending_upload` → `processing` (complete) → `ready` (worker persisted duration, dimensions, codecs, container, bitrate and the thumbnail) or `failed` with `failure_reason`: `size_mismatch` (complete), `invalid_media` (ffprobe rejects the file, no retry), `processing_error` (3 attempts exhausted), `upload_expired` (hourly sweep: `pending_upload` older than 24h, multipart aborted).
+
+**Storage keys** (single private bucket `S3_BUCKET`): `videos/{id}/original`, `videos/{id}/thumbnail.jpg` (JPEG, 1280px wide, frame at 10% of the duration).
+
+**Testing:** storage/queue/ffmpeg tests run against the real `rustfs`, `redis` and ffmpeg. Integration tests use a throwaway bucket (`src/test/storage.ts`) and media generated by ffmpeg (`src/test/video-fixture.ts`); anything that creates BullMQ queues or workers uses its own `prefix` (`test-<uuid>`) so the running `video-worker` never consumes test jobs.
 
 ## Code Conventions
 
