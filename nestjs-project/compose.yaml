@@ -31,7 +31,7 @@ services:
       - -c
       - |
         npm run start:worker:dev &
-        trap 'pkill -TERM -f "^node .*dist/worker"; while pgrep -f "^node .*dist/worker" > /dev/null; do sleep 0.2; done; exit 0' TERM INT
+        trap 'pkill -TERM -f "^node .*dist-worker/worker"; while pgrep -f "^node .*dist-worker/worker" > /dev/null; do sleep 0.2; done; exit 0' TERM INT
         wait
     # Room for an active job to finish on stop: ffprobe (60 s) plus the frame
     # extraction (120 s) time out within it. Docker's default is 10 s.

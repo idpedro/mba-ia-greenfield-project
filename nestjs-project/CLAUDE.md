@@ -40,7 +40,7 @@ Services:
 - `mailpit` — SMTP `1025`, web UI `http://localhost:8025`
 - `redis` — Redis 7.4 (BullMQ queues), internal only (`redis:6379`)
 - `rustfs` — S3-compatible object storage (videos and thumbnails). Containers use `S3_ENDPOINT=http://rustfs:9000`; the browser uses `S3_PUBLIC_ENDPOINT`. The host port is `${S3_HOST_PORT:-9000}` — if 9000 is taken, set `S3_HOST_PORT` in `.env` and point `S3_PUBLIC_ENDPOINT` to the same port (e.g. `S3_HOST_PORT=9004`, `S3_PUBLIC_ENDPOINT=http://localhost:9004`). Tests force `S3_PUBLIC_ENDPOINT=http://rustfs:9000` (`src/test/setup-test-env.ts`)
-- `video-worker` — second Nest process (`npm run start:worker:dev`, entrypoint `src/worker.ts`): consumes the BullMQ jobs and runs FFmpeg, no HTTP. It starts automatically with `docker compose up -d`; `docker compose stop` waits up to 3 min (`stop_grace_period`) for an active job. It shares `dist/` with the API, so starting `start:dev` in `nestjs-api` rebuilds `dist/` and makes the worker restart
+- `video-worker` — second Nest process (`npm run start:worker:dev`, entrypoint `src/worker.ts`): consumes the BullMQ jobs and runs FFmpeg, no HTTP. It starts automatically with `docker compose up -d`; `docker compose stop` waits up to 3 min (`stop_grace_period`) for an active job. It builds into its own `dist-worker/` (`tsconfig.worker.json`), so `start:dev`/`build` in `nestjs-api` (which rebuild `dist/`) do not touch it
 
 Host-side ports are configurable in `.env` (`API_HOST_PORT`, `DB_HOST_PORT`, `MAIL_SMTP_HOST_PORT`, `MAIL_UI_HOST_PORT`; defaults are the ports above) for machines where a default port is already taken. Containers always reach each other on the internal ports (`db:5432`, `mailpit:1025`).
 
