@@ -33,7 +33,9 @@ docker compose exec nestjs-api npm run start:dev
 
 Services:
 - `nestjs-api` — NestJS API, port `3000`
-- `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
+- `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`, data in the named volume `postgres_data`
+
+Host-side ports are configurable in `.env` (`API_HOST_PORT`, `DB_HOST_PORT`, `MAIL_SMTP_HOST_PORT`, `MAIL_UI_HOST_PORT`; defaults are the ports above) for machines where a default port is already taken. Containers always reach each other on the internal ports (`db:5432`, `mailpit:1025`).
 
 All verification and teardown commands run on the **host machine**:
 
