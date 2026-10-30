@@ -438,6 +438,534 @@
           "auth"
         ]
       }
+    },
+    "/videos": {
+      "post": {
+        "description": "Creates the video as a draft in the caller's channel and opens the multipart upload of its file. The response tells how many parts of which size the client must send.",
+        "operationId": "VideosController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateVideoDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Draft created and multipart upload started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedVideoResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (unsupported mime_type, size_bytes above 10 GiB, missing fields)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Start a video upload",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/videos/{id}/upload/part-urls": {
+      "post": {
+        "description": "Signs presigned PUT URLs for the given parts of the caller's pending multipart upload. The client sends each part's bytes directly to the storage. Call it at start and again on resume, since the URLs expire after 1 hour.",
+        "operationId": "VideosController_signPartUrls",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestPartUrlsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Part URLs signed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartUrlsResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR when the body is invalid or :id is not a uuid; INVALID_PART_NUMBER when a part_number exceeds the part count",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Video does not exist or is not in the caller's channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Video upload is not pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Sign part upload URLs",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/videos/{id}/upload/parts": {
+      "get": {
+        "description": "Lists the parts already stored in the caller's pending multipart upload, ordered by part number, so an interrupted upload can be resumed by sending only the missing parts.",
+        "operationId": "VideosController_listUploadedParts",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Parts already stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadedPartsResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR when :id is not a uuid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Video does not exist or is not in the caller's channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Video upload is not pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "List uploaded parts",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/videos/{id}/upload/complete": {
+      "post": {
+        "description": "Completes the multipart upload with the ETag of every part, checks the stored size against the declared one and starts the automatic processing of the video.",
+        "operationId": "VideosController_completeUpload",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteUploadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Upload completed; the video is now processing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR when the body is invalid or :id is not a uuid; UPLOAD_INCOMPLETE when the storage rejects the part list (the upload stays open for a retry)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Video does not exist or is not in the caller's channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Video upload is not pending (includes a repeated complete)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Stored size differs from the declared one; the file is deleted and the video marked as failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Complete a video upload",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/videos/{slug}": {
+      "get": {
+        "description": "Returns the caller's video addressed by its slug, with its processing status, the extracted metadata and a presigned thumbnail URL (valid for 1 hour) once processing is done.",
+        "operationId": "VideosController_findBySlug",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Video and its processing status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Slug is malformed, does not exist or belongs to a video outside the caller's channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Get a video",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/videos/{slug}/stream": {
+      "get": {
+        "description": "Redirects the owner to a presigned GET URL of the original file (valid for 1 hour) on the storage, which answers Range requests with 206, so the video plays without being fully downloaded and its bytes never pass through the API.",
+        "operationId": "VideosController_stream",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the presigned URL of the video file; the response has no body",
+            "headers": {
+              "Location": {
+                "description": "Presigned GET URL of the video file, valid for 1 hour",
+                "schema": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always no-store: the URL expires",
+                "schema": {
+                  "type": "string",
+                  "example": "no-store"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Slug is malformed, does not exist or belongs to a video outside the caller's channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Video is not ready (its processing has not finished)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Stream a video",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/videos/{slug}/download": {
+      "get": {
+        "description": "Redirects the owner to a presigned GET URL of the original file (valid for 1 hour) on the storage. The storage answers with Content-Disposition: attachment and the original file name (RFC 6266, with an RFC 5987 filename* for non-ASCII names), so the browser saves the file; its bytes never pass through the API.",
+        "operationId": "VideosController_download",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the presigned download URL of the video file; the response has no body",
+            "headers": {
+              "Location": {
+                "description": "Presigned GET URL of the video file with response-content-disposition, valid for 1 hour",
+                "schema": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always no-store: the URL expires",
+                "schema": {
+                  "type": "string",
+                  "example": "no-store"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Slug is malformed, does not exist or belongs to a video outside the caller's channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Video is not ready (its processing has not finished)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Download a video",
+        "tags": [
+          "videos"
+        ]
+      }
     }
   },
   "info": {
@@ -480,6 +1008,368 @@
       "ResetPasswordDto": {
         "type": "object",
         "properties": {}
+      },
+      "CreateVideoDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "VideoProcessingStatus": {
+        "type": "string",
+        "enum": [
+          "pending_upload",
+          "processing",
+          "ready",
+          "failed"
+        ]
+      },
+      "VideoPublicationStatus": {
+        "type": "string",
+        "enum": [
+          "draft"
+        ]
+      },
+      "VideoUploadPlanDto": {
+        "type": "object",
+        "properties": {
+          "part_size_bytes": {
+            "type": "number",
+            "example": 67108864
+          },
+          "part_count": {
+            "type": "number",
+            "example": 3
+          }
+        },
+        "required": [
+          "part_size_bytes",
+          "part_count"
+        ]
+      },
+      "CreatedVideoResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": "string",
+            "example": "dQw4w9WgXcQ",
+            "minLength": 11,
+            "maxLength": 11
+          },
+          "title": {
+            "type": "string",
+            "example": "aula"
+          },
+          "original_filename": {
+            "type": "string",
+            "example": "aula.mp4"
+          },
+          "mime_type": {
+            "type": "string",
+            "example": "video/mp4"
+          },
+          "processing_status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VideoProcessingStatus"
+              }
+            ]
+          },
+          "publication_status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VideoPublicationStatus"
+              }
+            ]
+          },
+          "failure_reason": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "duration_seconds": {
+            "type": "number",
+            "nullable": true,
+            "example": null
+          },
+          "width": {
+            "type": "number",
+            "nullable": true,
+            "example": null
+          },
+          "height": {
+            "type": "number",
+            "nullable": true,
+            "example": null
+          },
+          "video_codec": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "audio_codec": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "container_format": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "bitrate": {
+            "type": "number",
+            "nullable": true,
+            "example": null
+          },
+          "size_bytes": {
+            "type": "number",
+            "nullable": true,
+            "example": null
+          },
+          "thumbnail_url": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "processed_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "upload": {
+            "$ref": "#/components/schemas/VideoUploadPlanDto"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "title",
+          "original_filename",
+          "mime_type",
+          "processing_status",
+          "publication_status",
+          "failure_reason",
+          "duration_seconds",
+          "width",
+          "height",
+          "video_codec",
+          "audio_codec",
+          "container_format",
+          "bitrate",
+          "size_bytes",
+          "thumbnail_url",
+          "created_at",
+          "processed_at",
+          "upload"
+        ]
+      },
+      "RequestPartUrlsDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "PartUrlDto": {
+        "type": "object",
+        "properties": {
+          "part_number": {
+            "type": "number",
+            "example": 1
+          },
+          "url": {
+            "type": "string",
+            "example": "https://storage.example.com/streamtube/videos/0b9e.../original?partNumber=1&uploadId=...&X-Amz-Signature=..."
+          }
+        },
+        "required": [
+          "part_number",
+          "url"
+        ]
+      },
+      "PartUrlsResponseDto": {
+        "type": "object",
+        "properties": {
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PartUrlDto"
+            }
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "parts",
+          "expires_at"
+        ]
+      },
+      "UploadedPartDto": {
+        "type": "object",
+        "properties": {
+          "part_number": {
+            "type": "number",
+            "example": 1
+          },
+          "etag": {
+            "type": "string",
+            "example": "\"9b2cf535f27731c974343645a3985328\""
+          },
+          "size_bytes": {
+            "type": "number",
+            "example": 67108864
+          }
+        },
+        "required": [
+          "part_number",
+          "etag",
+          "size_bytes"
+        ]
+      },
+      "UploadedPartsResponseDto": {
+        "type": "object",
+        "properties": {
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UploadedPartDto"
+            }
+          }
+        },
+        "required": [
+          "parts"
+        ]
+      },
+      "CompleteUploadDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "VideoResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": "string",
+            "example": "dQw4w9WgXcQ",
+            "minLength": 11,
+            "maxLength": 11
+          },
+          "title": {
+            "type": "string",
+            "example": "aula"
+          },
+          "original_filename": {
+            "type": "string",
+            "example": "aula.mp4"
+          },
+          "mime_type": {
+            "type": "string",
+            "example": "video/mp4"
+          },
+          "processing_status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VideoProcessingStatus"
+              }
+            ]
+          },
+          "publication_status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VideoPublicationStatus"
+              }
+            ]
+          },
+          "failure_reason": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "duration_seconds": {
+            "type": "number",
+            "nullable": true,
+            "example": null
+          },
+          "width": {
+            "type": "number",
+            "nullable": true,
+            "example": null
+          },
+          "height": {
+            "type": "number",
+            "nullable": true,
+            "example": null
+          },
+          "video_codec": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "audio_codec": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "container_format": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "bitrate": {
+            "type": "number",
+            "nullable": true,
+            "example": null
+          },
+          "size_bytes": {
+            "type": "number",
+            "nullable": true,
+            "example": null
+          },
+          "thumbnail_url": {
+            "type": "string",
+            "nullable": true,
+            "example": null
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "processed_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "title",
+          "original_filename",
+          "mime_type",
+          "processing_status",
+          "publication_status",
+          "failure_reason",
+          "duration_seconds",
+          "width",
+          "height",
+          "video_codec",
+          "audio_codec",
+          "container_format",
+          "bitrate",
+          "size_bytes",
+          "thumbnail_url",
+          "created_at",
+          "processed_at"
+        ]
       },
       "ApiErrorEnvelope": {
         "type": "object",

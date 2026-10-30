@@ -13,6 +13,9 @@ docker compose ps   # all services must show status "running"
 Then verify each infrastructure service is actually ready to accept connections — not just running:
 
 - **PostgreSQL:** `docker compose exec db pg_isready -U streamtube` — expect `accepting connections`
+- **Redis:** `docker compose exec redis redis-cli ping` — expect `PONG`
+- **RustFS:** `docker compose exec nestjs-api curl -s http://rustfs:9000/health` — expect `"status":"ok"`
+- **Video worker:** `docker compose logs video-worker` — expect `Video worker started`
 
 Only start the NestJS dev server (`npm run start:dev`) when the user **explicitly** asks to run the application — never as part of "start the environment".
 
@@ -34,8 +37,14 @@ docker compose exec nestjs-api npm run start:dev
 Services:
 - `nestjs-api` — NestJS API, port `3000`
 - `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`, data in the named volume `postgres_data`
+- `mailpit` — SMTP `1025`, web UI `http://localhost:8025`
+- `redis` — Redis 7.4 (BullMQ queues), internal only (`redis:6379`)
+- `rustfs` — S3-compatible object storage (videos and thumbnails). Containers use `S3_ENDPOINT=http://rustfs:9000`; the browser uses `S3_PUBLIC_ENDPOINT`. The host port is `${S3_HOST_PORT:-9000}` — if 9000 is taken, set `S3_HOST_PORT` in `.env` and point `S3_PUBLIC_ENDPOINT` to the same port (e.g. `S3_HOST_PORT=9004`, `S3_PUBLIC_ENDPOINT=http://localhost:9004`). Tests force `S3_PUBLIC_ENDPOINT=http://rustfs:9000` (`src/test/setup-test-env.ts`)
+- `video-worker` — second Nest process (`npm run start:worker:dev`, entrypoint `src/worker.ts`): consumes the BullMQ jobs and runs FFmpeg, no HTTP. It starts automatically with `docker compose up -d`; `docker compose stop` waits up to 3 min (`stop_grace_period`) for an active job. It shares `dist/` with the API, so starting `start:dev` in `nestjs-api` rebuilds `dist/` and makes the worker restart
 
 Host-side ports are configurable in `.env` (`API_HOST_PORT`, `DB_HOST_PORT`, `MAIL_SMTP_HOST_PORT`, `MAIL_UI_HOST_PORT`; defaults are the ports above) for machines where a default port is already taken. Containers always reach each other on the internal ports (`db:5432`, `mailpit:1025`).
+
+The full upload → processing → streaming flow is scripted in `api.http` (requests 10–17).
 
 All verification and teardown commands run on the **host machine**:
 
@@ -46,9 +55,14 @@ curl http://localhost:3000
 # Verify PostgreSQL is ready (runs inside the db container)
 docker compose exec db pg_isready -U streamtube
 
+# Verify Redis and RustFS are ready
+docker compose exec redis redis-cli ping
+docker compose exec nestjs-api curl -s http://rustfs:9000/health
+
 # Check container logs
 docker compose logs nestjs-api
 docker compose logs db
+docker compose logs -f video-worker   # follow video processing jobs
 
 # Tear down the entire environment
 docker compose down
@@ -71,6 +85,7 @@ npm run test:cov                         # Coverage report
 npm run test:e2e                         # End-to-end tests (always with --runInBand)
 
 npx tsc --noEmit                         # Type-check (required before declaring a task done)
+npm run openapi:export                   # Regenerate the versioned openapi.json (exits, no server)
 npm run lint                             # ESLint with auto-fix
 npm run format                           # Prettier formatting
 ```
@@ -81,6 +96,9 @@ npm run format                           # Prettier formatting
 docker compose ps
 docker compose logs nestjs-api
 docker compose exec db pg_isready -U streamtube
+docker compose exec redis redis-cli ping
+docker compose exec nestjs-api curl -s http://rustfs:9000/health
+docker compose logs -f video-worker
 curl http://localhost:3000
 ```
 
