@@ -176,4 +176,4 @@
 - Unit + integration (`npm test -- --runInBand`): 46 suítes, 332/332 passing
 - E2E (`npm run test:e2e`): 10 suítes, 83/83 passing — o script não tinha `--runInBand` (pré-existente, apesar de o CLAUDE.md dizer "already configured"); em paralelo as suítes de vídeo disputavam banco/bucket e falhavam. Adicionado `--runInBand` ao script.
 - `npx tsc --noEmit`: exit 0
-- Lint: **falha** com 150 erros pré-existentes em 11 arquivos das Fases 01/02 (`auth.service.spec.ts` 45, `test/auth.e2e-spec.ts` 48, `mail.service.integration-spec.ts` 16, `channels.service.spec.ts` 15, `channels.service.ts` 6, etc.). Nenhum arquivo da Fase 03 tem erro. Fora do escopo desta fase — precisa de tarefa separada.
+- Lint: 0 erros, 0 avisos — a dívida de 150 erros da Fase 02 foi corrigida na branch `bugfix/lint-debt` (merge em `main`) e esta branch foi rebaseada sobre ela. Suítes reexecutadas após o rebase: 332/332 e 83/83.
