@@ -1,6 +1,6 @@
 services:
   nestjs-api:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile.dev
     ports:
@@ -12,6 +12,39 @@ services:
         condition: service_healthy
       mailpit:
         condition: service_started
+      redis:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+
+  # Second process of the modular monolith: consumes the BullMQ queues, no HTTP.
+  video-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    # The Nest CLI watcher dies on SIGTERM without waiting for the app, and the
+    # container exits with it, killing the worker before its shutdown hooks
+    # close the BullMQ workers. The trap forwards SIGTERM to the app process and
+    # waits for it to exit before the container stops.
+    command:
+      - sh
+      - -c
+      - |
+        npm run start:worker:dev &
+        trap 'pkill -TERM -f "^node .*dist-worker/worker"; while pgrep -f "^node .*dist-worker/worker" > /dev/null; do sleep 0.2; done; exit 0' TERM INT
+        wait
+    # Room for an active job to finish on stop: ffprobe (60 s) plus the frame
+    # extraction (120 s) time out within it. Docker's default is 10 s.
+    stop_grace_period: 3m
+    volumes:
+      - .:/home/node/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
 
   db:
     image: postgres:17
@@ -35,5 +68,36 @@ services:
       - "${MAIL_SMTP_HOST_PORT:-1025}:1025"
       - "${MAIL_UI_HOST_PORT:-8025}:8025"
 
+  redis:
+    image: redis:7.4-alpine
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # The browser uploads parts and streams videos straight from this service,
+  # so the S3 API port is published (S3_HOST_PORT overrides the host side
+  # when 9000 is already taken on the machine).
+  rustfs:
+    image: rustfs/rustfs:1.0.4
+    ports:
+      - "${S3_HOST_PORT:-9000}:9000"
+    environment:
+      - RUSTFS_ACCESS_KEY=${S3_ACCESS_KEY_ID}
+      - RUSTFS_SECRET_KEY=${S3_SECRET_ACCESS_KEY}
+      - RUSTFS_CORS_ALLOWED_ORIGINS=${S3_CORS_ALLOWED_ORIGINS:-*}
+    volumes:
+      - rustfs_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   postgres_data:
+  redis_data:
+  rustfs_data:

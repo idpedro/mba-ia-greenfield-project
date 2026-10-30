@@ -118,3 +118,95 @@ Content-Type: {{contentType}}
   "token": "{{resetToken}}",
   "new_password": "new-password123"
 }
+
+
+###
+# ─────────────────────────────────────────────
+# VÍDEOS — UPLOAD, PROCESSAMENTO E STREAMING
+# ─────────────────────────────────────────────
+#
+# Requer login (requisição 4) e os serviços redis, rustfs e video-worker de pé.
+# O exemplo usa um arquivo de até 64 MiB, ou seja, uma única parte
+# (part_count = 1). Para arquivos maiores, peça uma URL por parte e envie
+# cada fatia de 64 MiB na URL do seu part_number.
+#
+# Gere um vídeo de exemplo na raiz do nestjs-project (dentro do container):
+#   docker compose exec nestjs-api ffmpeg -f lavfi -i testsrc=duration=3:size=640x360:rate=30 -pix_fmt yuv420p sample.mp4
+
+@videoFile = ./sample.mp4
+@videoSizeBytes = <tamanho de sample.mp4 em bytes>
+
+# Capturados automaticamente das respostas abaixo
+@videoId = {{createVideo.response.body.$.id}}
+@videoSlug = {{createVideo.response.body.$.slug}}
+@part1Url = {{partUrls.response.body.$.parts[0].url}}
+@part1Etag = {{uploadPart1.response.headers.ETag}}
+
+
+### 10. Pré-cadastrar o vídeo e iniciar o upload multipart
+# A resposta traz upload.part_size_bytes e upload.part_count
+# @name createVideo
+POST {{baseUrl}}/videos
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "filename": "sample.mp4",
+  "mime_type": "video/mp4",
+  "size_bytes": {{videoSizeBytes}},
+  "title": "Vídeo de exemplo"
+}
+
+
+### 11. Obter URLs pré-assinadas para as partes
+# @name partUrls
+POST {{baseUrl}}/videos/{{videoId}}/upload/part-urls
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "part_numbers": [1]
+}
+
+
+### 12. Enviar a parte 1 direto para o storage (RustFS), sem passar pela API
+# O header ETag da resposta é capturado para a conclusão do upload
+# @name uploadPart1
+PUT {{part1Url}}
+Content-Type: video/mp4
+
+< {{videoFile}}
+
+
+### 13. Listar as partes já recebidas pelo storage (retomada do upload)
+GET {{baseUrl}}/videos/{{videoId}}/upload/parts
+Authorization: Bearer {{accessToken}}
+
+
+### 14. Concluir o upload — o vídeo vai para processing e o job é enfileirado
+# O header ETag já vem entre aspas, por isso {{part1Etag}} não leva aspas no JSON
+POST {{baseUrl}}/videos/{{videoId}}/upload/complete
+Authorization: Bearer {{accessToken}}
+Content-Type: {{contentType}}
+
+{
+  "parts": [
+    { "part_number": 1, "etag": {{part1Etag}} }
+  ]
+}
+
+
+### 15. Detalhe do vídeo — repita até processing_status = ready (ou failed)
+# Acompanhe o processamento com: docker compose logs -f video-worker
+GET {{baseUrl}}/videos/{{videoSlug}}
+Authorization: Bearer {{accessToken}}
+
+
+### 16. Streaming — 302 para a URL pré-assinada do arquivo no storage
+GET {{baseUrl}}/videos/{{videoSlug}}/stream
+Authorization: Bearer {{accessToken}}
+
+
+### 17. Download — 302 para a URL pré-assinada com Content-Disposition: attachment
+GET {{baseUrl}}/videos/{{videoSlug}}/download
+Authorization: Bearer {{accessToken}}

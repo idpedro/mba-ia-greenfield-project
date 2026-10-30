@@ -5,7 +5,7 @@ import { buildSwaggerDocument } from './swagger/swagger-document';
 
 export async function exportSpec(outputPath = 'openapi.json'): Promise<void> {
   const app = await NestFactory.create(AppModule, { logger: false });
-  const document = buildSwaggerDocument(app);
+  const document = await buildSwaggerDocument(app);
   writeFileSync(outputPath, JSON.stringify(document, null, 2));
   await app.close();
 }
