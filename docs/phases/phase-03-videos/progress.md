@@ -177,3 +177,10 @@
 - E2E (`npm run test:e2e`): 10 suítes, 83/83 passing — o script não tinha `--runInBand` (pré-existente, apesar de o CLAUDE.md dizer "already configured"); em paralelo as suítes de vídeo disputavam banco/bucket e falhavam. Adicionado `--runInBand` ao script.
 - `npx tsc --noEmit`: exit 0
 - Lint: 0 erros, 0 avisos — a dívida de 150 erros da Fase 02 foi corrigida na branch `bugfix/lint-debt` (merge em `main`) e esta branch foi rebaseada sobre ela. Suítes reexecutadas após o rebase: 332/332 e 83/83.
+
+## Correções pós-implementação (antes do merge)
+
+- `de23a00` — mensagens de erro do ffprobe/ffmpeg passam a trazer a URL sem query string (sem assinatura/credencial nos logs do worker). O `cause` (erro cru do `execFile`) ainda contém a URL completa, mas nada o registra hoje.
+- `e2c908c` — worker compila em `dist-worker/` (`tsconfig.worker.json`); `start:dev`/`nest build` da API não derrubam mais o worker.
+- `cd04363` — resolve a lacuna do SI-03.18: `openapi:export` gera `src/metadata.ts` (plugin do Swagger via `PluginMetadataGenerator`) e `buildSwaggerDocument` carrega o metadata; `openapi.json`, servidor compilado e e2e produzem o mesmo documento, com DTOs de request completos. `CreateVideoDto` ganhou `@ApiProperty` explícito em `mime_type` (enum) e `size_bytes` (maximum), que o plugin em modo readonly não infere. `src/metadata.ts` é versionado, protegido por teste de staleness e ignorado pelo Prettier.
+- Verificação após as correções: unit+integration 346/346, e2e 84/84, `tsc` ok, lint 0 erros.
