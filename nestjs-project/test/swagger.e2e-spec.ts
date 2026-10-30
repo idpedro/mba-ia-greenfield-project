@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { SwaggerModule } from '@nestjs/swagger';
@@ -6,7 +8,9 @@ import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
 import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
-import { buildSwaggerConfig } from '../src/swagger/swagger-document';
+import { buildSwaggerDocument } from '../src/swagger/swagger-document';
+
+const VERSIONED_OPENAPI_PATH = join(__dirname, '..', 'openapi.json');
 
 async function createApp(withSwagger: boolean): Promise<INestApplication<App>> {
   const moduleFixture = await Test.createTestingModule({
@@ -27,7 +31,7 @@ async function createApp(withSwagger: boolean): Promise<INestApplication<App>> {
   );
 
   if (withSwagger) {
-    const document = SwaggerModule.createDocument(app, buildSwaggerConfig());
+    const document = await buildSwaggerDocument(app);
     SwaggerModule.setup('api/docs', app, document, {
       customSiteTitle: 'StreamTube API Docs',
       swaggerOptions: { persistAuthorization: true },
@@ -77,6 +81,70 @@ describe('Swagger endpoints (e2e)', () => {
       ).toMatchObject({
         'access-token': { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
       });
+    });
+
+    it('GET /api/docs-json documents the 7 /videos routes', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/docs-json')
+        .expect(200);
+      const paths = (res.body as { paths: Record<string, object> }).paths;
+
+      expect(Object.keys(paths['/videos'])).toEqual(['post']);
+      expect(Object.keys(paths['/videos/{id}/upload/part-urls'])).toEqual([
+        'post',
+      ]);
+      expect(Object.keys(paths['/videos/{id}/upload/parts'])).toEqual(['get']);
+      expect(Object.keys(paths['/videos/{id}/upload/complete'])).toEqual([
+        'post',
+      ]);
+      expect(Object.keys(paths['/videos/{slug}'])).toEqual(['get']);
+      expect(Object.keys(paths['/videos/{slug}/stream'])).toEqual(['get']);
+      expect(Object.keys(paths['/videos/{slug}/download'])).toEqual(['get']);
+    });
+
+    it('GET /api/docs-json includes the CLI plugin metadata (request DTO properties and query params)', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/docs-json')
+        .expect(200);
+      const doc = res.body as {
+        paths: Record<
+          string,
+          Record<string, { parameters?: { name: string; in: string }[] }>
+        >;
+        components: {
+          schemas: Record<string, { properties?: Record<string, unknown> }>;
+        };
+      };
+
+      expect(
+        Object.keys(doc.components.schemas.CreateVideoDto.properties ?? {}),
+      ).toEqual(
+        expect.arrayContaining([
+          'filename',
+          'mime_type',
+          'size_bytes',
+          'title',
+        ]),
+      );
+      expect(
+        Object.keys(doc.components.schemas.RegisterDto.properties ?? {}),
+      ).toEqual(expect.arrayContaining(['email', 'password']));
+      expect(doc.paths['/auth/confirm-email'].get.parameters).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: 'token', in: 'query' }),
+        ]),
+      );
+    });
+
+    it('GET /api/docs-json equals the versioned openapi.json', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/docs-json')
+        .expect(200);
+      const versioned: unknown = JSON.parse(
+        readFileSync(VERSIONED_OPENAPI_PATH, 'utf-8'),
+      );
+
+      expect(res.body).toEqual(versioned);
     });
 
     it('GET /api/docs-yaml returns 200 with YAML content', async () => {

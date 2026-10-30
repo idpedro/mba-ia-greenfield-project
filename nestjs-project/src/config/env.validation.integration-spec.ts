@@ -1,4 +1,10 @@
+import type { ValidationError } from 'joi';
 import { envValidationSchema } from './env.validation';
+
+interface EnvValidationResult {
+  error?: ValidationError;
+  value: { SWAGGER_ENABLED: string };
+}
 
 const requiredEnv = {
   DB_USERNAME: 'user',
@@ -6,13 +12,18 @@ const requiredEnv = {
   DB_NAME: 'db',
   JWT_SECRET: 'secret',
   JWT_REFRESH_SECRET: 'refresh-secret',
+  S3_ENDPOINT: 'http://rustfs:9000',
+  S3_PUBLIC_ENDPOINT: 'http://localhost:9000',
+  S3_ACCESS_KEY_ID: 'access',
+  S3_SECRET_ACCESS_KEY: 'secret',
+  S3_BUCKET: 'bucket',
 };
 
 const validate = (env: Record<string, string>) =>
   envValidationSchema.validate(
     { ...requiredEnv, ...env },
     { allowUnknown: true, abortEarly: false },
-  );
+  ) as EnvValidationResult;
 
 describe('envValidationSchema — SWAGGER_ENABLED', () => {
   it('should reject SWAGGER_ENABLED with an invalid value', () => {

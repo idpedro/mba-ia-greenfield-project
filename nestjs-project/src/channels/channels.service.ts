@@ -7,19 +7,30 @@ const PG_UNIQUE_VIOLATION = '23505';
 const NICKNAME_COLUMN = 'nickname';
 const MAX_RETRIES = 5;
 
+interface PgErrorFields {
+  code?: unknown;
+  detail?: unknown;
+}
+
 function isPgUniqueViolationOnColumn(err: unknown, column: string): boolean {
   if (!(err instanceof QueryFailedError)) return false;
-  const e = err as any;
+  const { code, detail } = err as QueryFailedError & PgErrorFields;
   return (
-    e.code === PG_UNIQUE_VIOLATION &&
-    typeof e.detail === 'string' &&
-    e.detail.includes(column)
+    code === PG_UNIQUE_VIOLATION &&
+    typeof detail === 'string' &&
+    detail.includes(column)
   );
 }
 
 @Injectable()
 export class ChannelsService {
   constructor(private readonly dataSource: DataSource) {}
+
+  async findByUserId(userId: string): Promise<Channel | null> {
+    return this.dataSource
+      .getRepository(Channel)
+      .findOneBy({ user_id: userId });
+  }
 
   async createChannel(userId: string, email: string): Promise<Channel> {
     const baseNickname = sanitizeNickname(email.split('@')[0]);
