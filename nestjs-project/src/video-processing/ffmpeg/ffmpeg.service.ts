@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { execFile, type ExecFileException } from 'child_process';
 import { InvalidMediaError, MediaToolError } from './ffmpeg.errors';
 import type { ProbeResult } from './ffmpeg.types';
+import { redactPresignedUrls } from './redact-url';
 
 export const PROBE_TIMEOUT_MS = 60_000;
 export const EXTRACT_FRAME_TIMEOUT_MS = 120_000;
@@ -82,7 +83,7 @@ export class FfmpegService {
         PROBE_TIMEOUT_MS,
       );
     } catch (failure) {
-      throw this.classifyProbeFailure(failure as CommandFailure);
+      throw this.classifyProbeFailure(failure as CommandFailure, inputUrl);
     }
     return this.mapProbeOutput(stdout);
   }
@@ -120,7 +121,7 @@ export class FfmpegService {
     } catch (failure) {
       const commandFailure = failure as CommandFailure;
       throw new MediaToolError(
-        `ffmpeg failed to extract a frame: ${this.describe(commandFailure)}`,
+        `ffmpeg failed to extract a frame: ${this.describe(commandFailure, inputUrl)}`,
         { cause: commandFailure.error },
       );
     }
@@ -147,9 +148,12 @@ export class FfmpegService {
     });
   }
 
-  private classifyProbeFailure(failure: CommandFailure): Error {
+  private classifyProbeFailure(
+    failure: CommandFailure,
+    inputUrl: string,
+  ): Error {
     const { error, stderr } = failure;
-    const message = `ffprobe failed: ${this.describe(failure)}`;
+    const message = `ffprobe failed: ${this.describe(failure, inputUrl)}`;
     // Killed (timeout) or not started at all (e.g. ENOENT): transient.
     const exitedWithCode = typeof error.code === 'number' && !error.killed;
     const unreachable = UNREACHABLE_INPUT_PATTERNS.some((pattern) =>
@@ -212,9 +216,10 @@ export class FfmpegService {
     return Number.isFinite(parsed) ? parsed : null;
   }
 
-  private describe(failure: CommandFailure): string {
-    return failure.error.killed
-      ? `timed out or killed (${failure.message})`
-      : failure.message;
+  // stderr and the exec error message echo the presigned input URL; only its
+  // origin and path may reach error messages and logs.
+  private describe(failure: CommandFailure, inputUrl: string): string {
+    const detail = redactPresignedUrls(failure.message, inputUrl);
+    return failure.error.killed ? `timed out or killed (${detail})` : detail;
   }
 }

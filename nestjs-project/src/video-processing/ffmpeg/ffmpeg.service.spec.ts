@@ -305,6 +305,105 @@ describe('FfmpegService', () => {
   });
 });
 
+describe('FfmpegService error messages', () => {
+  const PRESIGNED_URL =
+    'http://rustfs:9000/streamtube/videos/id/original' +
+    '?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA%2F20261030%2Fus-east-1%2Fs3%2Faws4_request' +
+    '&X-Amz-Date=20261030T120000Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host' +
+    '&X-Amz-Signature=deadbeefcafe';
+  const REDACTED_URL = 'http://rustfs:9000/streamtube/videos/id/original';
+  const SECRETS = ['X-Amz-', 'deadbeefcafe', 'AKIA', '?'];
+  let service: FfmpegService;
+
+  function expectNoPresignedQuery(error: unknown): void {
+    const { message } = error as Error;
+    for (const secret of SECRETS) {
+      expect(message).not.toContain(secret);
+    }
+  }
+
+  function commandFailed(code: number, killed = false): ExecFileException {
+    // Node puts the whole command line, URL included, in the message.
+    return Object.assign(
+      new Error(`Command failed: ffprobe -v error ${PRESIGNED_URL}`),
+      { code, killed },
+    );
+  }
+
+  beforeEach(async () => {
+    execFileMock.mockReset();
+    const module = await Test.createTestingModule({
+      providers: [FfmpegService],
+    }).compile();
+    service = module.get(FfmpegService);
+  });
+
+  it('should redact the URL echoed in stderr of an InvalidMediaError', async () => {
+    mockExecResult(
+      commandFailed(1),
+      '{}',
+      `${PRESIGNED_URL}: Invalid data found when processing input\n`,
+    );
+
+    const error = await service.probe(PRESIGNED_URL).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(InvalidMediaError);
+    expectNoPresignedQuery(error);
+    expect((error as Error).message).toContain(
+      `${REDACTED_URL}: Invalid data found`,
+    );
+  });
+
+  it('should redact the URL echoed in stderr of a MediaToolError', async () => {
+    mockExecResult(
+      commandFailed(1),
+      '{}',
+      `[http @ 0x1] HTTP error 403 Forbidden\n${PRESIGNED_URL}: Server returned 403 Forbidden (access denied)\n`,
+    );
+
+    const error = await service.probe(PRESIGNED_URL).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(MediaToolError);
+    expectNoPresignedQuery(error);
+    expect((error as Error).message).toContain(REDACTED_URL);
+  });
+
+  it('should redact the URL in the exec error message when stderr is empty (timeout)', async () => {
+    mockExecResult(commandFailed(null as unknown as number, true));
+
+    const error = await service.probe(PRESIGNED_URL).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(MediaToolError);
+    expect((error as Error).message).toContain('timed out or killed');
+    expectNoPresignedQuery(error);
+  });
+
+  it('should redact the URL from extractFrame failures', async () => {
+    mockExecResult(
+      commandFailed(1),
+      '',
+      `${PRESIGNED_URL}: Server returned 404 Not Found\n`,
+    );
+
+    const error = await service
+      .extractFrame(PRESIGNED_URL, 0, '/tmp/thumb.jpg')
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(MediaToolError);
+    expectNoPresignedQuery(error);
+    expect((error as Error).message).toContain(REDACTED_URL);
+  });
+
+  it('should still pass the full presigned URL to the binary', async () => {
+    mockExecResult(null, probeJson());
+
+    await service.probe(PRESIGNED_URL);
+
+    const [, args] = execFileMock.mock.calls[0] as [string, string[]];
+    expect(args).toContain(PRESIGNED_URL);
+  });
+});
+
 describe('thumbnailTimestamp', () => {
   it('should return 10% of the duration', () => {
     expect(thumbnailTimestamp(120)).toBe(12);
