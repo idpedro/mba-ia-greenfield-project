@@ -8,7 +8,6 @@ import { DomainExceptionFilter } from './common/filters/domain-exception.filter'
 import { ValidationExceptionFilter } from './common/filters/validation-exception.filter';
 import swaggerConfig from './config/swagger.config';
 import { buildSwaggerDocument } from './swagger/swagger-document';
-import swaggerMetadata from './metadata.js';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -31,8 +30,7 @@ async function bootstrap() {
   const swagger = app.get<ConfigType<typeof swaggerConfig>>(swaggerConfig.KEY);
 
   if (swagger.enabled) {
-    await SwaggerModule.loadPluginMetadata(swaggerMetadata);
-    const document = buildSwaggerDocument(app);
+    const document = await buildSwaggerDocument(app);
     SwaggerModule.setup('api/docs', app, document, {
       customSiteTitle: 'StreamTube API Docs',
       swaggerOptions: { persistAuthorization: true },

@@ -1,3 +1,4 @@
+import { ApiProperty } from '@nestjs/swagger';
 import {
   IsIn,
   IsInt,
@@ -22,10 +23,14 @@ export class CreateVideoDto {
   filename: string;
 
   /** MIME type of the file. */
+  // Explicit: the generated src/metadata.ts (openapi:metadata) cannot
+  // reference imported constants, so the plugin alone would drop enum/maximum.
+  @ApiProperty({ enum: ACCEPTED_VIDEO_MIME_TYPES })
   @IsIn(ACCEPTED_VIDEO_MIME_TYPES)
   mime_type: AcceptedVideoMimeType;
 
   /** Size of the file in bytes (at most 10 GiB). */
+  @ApiProperty({ maximum: MAX_VIDEO_SIZE_BYTES })
   @IsInt()
   @Min(1)
   @Max(MAX_VIDEO_SIZE_BYTES)

@@ -31,7 +31,7 @@ async function createApp(withSwagger: boolean): Promise<INestApplication<App>> {
   );
 
   if (withSwagger) {
-    const document = buildSwaggerDocument(app);
+    const document = await buildSwaggerDocument(app);
     SwaggerModule.setup('api/docs', app, document, {
       customSiteTitle: 'StreamTube API Docs',
       swaggerOptions: { persistAuthorization: true },
@@ -100,6 +100,40 @@ describe('Swagger endpoints (e2e)', () => {
       expect(Object.keys(paths['/videos/{slug}'])).toEqual(['get']);
       expect(Object.keys(paths['/videos/{slug}/stream'])).toEqual(['get']);
       expect(Object.keys(paths['/videos/{slug}/download'])).toEqual(['get']);
+    });
+
+    it('GET /api/docs-json includes the CLI plugin metadata (request DTO properties and query params)', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/docs-json')
+        .expect(200);
+      const doc = res.body as {
+        paths: Record<
+          string,
+          Record<string, { parameters?: { name: string; in: string }[] }>
+        >;
+        components: {
+          schemas: Record<string, { properties?: Record<string, unknown> }>;
+        };
+      };
+
+      expect(
+        Object.keys(doc.components.schemas.CreateVideoDto.properties ?? {}),
+      ).toEqual(
+        expect.arrayContaining([
+          'filename',
+          'mime_type',
+          'size_bytes',
+          'title',
+        ]),
+      );
+      expect(
+        Object.keys(doc.components.schemas.RegisterDto.properties ?? {}),
+      ).toEqual(expect.arrayContaining(['email', 'password']));
+      expect(doc.paths['/auth/confirm-email'].get.parameters).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: 'token', in: 'query' }),
+        ]),
+      );
     });
 
     it('GET /api/docs-json equals the versioned openapi.json', async () => {

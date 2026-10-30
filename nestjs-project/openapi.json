@@ -7,7 +7,14 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "tags": [
@@ -81,7 +88,16 @@
       "get": {
         "description": "Validates the confirmation token and marks the user's email as confirmed.",
         "operationId": "AuthController_confirmEmail",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "token",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "Email confirmed successfully"
@@ -987,31 +1003,127 @@
     "schemas": {
       "RegisterDto": {
         "type": "object",
-        "properties": {}
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ]
       },
       "ResendConfirmationDto": {
         "type": "object",
-        "properties": {}
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          }
+        },
+        "required": [
+          "email"
+        ]
       },
       "LoginDto": {
         "type": "object",
-        "properties": {}
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "password": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ]
       },
       "RefreshTokenDto": {
         "type": "object",
-        "properties": {}
+        "properties": {
+          "refresh_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "refresh_token"
+        ]
       },
       "ForgotPasswordDto": {
         "type": "object",
-        "properties": {}
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          }
+        },
+        "required": [
+          "email"
+        ]
       },
       "ResetPasswordDto": {
         "type": "object",
-        "properties": {}
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "new_password": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "token",
+          "new_password"
+        ]
       },
       "CreateVideoDto": {
         "type": "object",
-        "properties": {}
+        "properties": {
+          "mime_type": {
+            "type": "string",
+            "description": "MIME type of the file.",
+            "enum": [
+              "video/mp4",
+              "video/webm",
+              "video/quicktime",
+              "video/x-matroska"
+            ]
+          },
+          "size_bytes": {
+            "type": "number",
+            "description": "Size of the file in bytes (at most 10 GiB).",
+            "minimum": 1,
+            "maximum": 10737418240
+          },
+          "filename": {
+            "type": "string",
+            "description": "Name of the file being uploaded, e.g. `aula.mp4`.",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "title": {
+            "type": "string",
+            "description": "Video title; defaults to `filename` without its extension.",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "mime_type",
+          "size_bytes",
+          "filename"
+        ]
       },
       "VideoProcessingStatus": {
         "type": "string",
@@ -1132,6 +1244,7 @@
           "thumbnail_url": {
             "type": "string",
             "nullable": true,
+            "description": "Presigned GET URL, present only once the thumbnail exists.",
             "example": null
           },
           "created_at": {
@@ -1140,8 +1253,8 @@
           },
           "processed_at": {
             "type": "string",
-            "format": "date-time",
-            "nullable": true
+            "nullable": true,
+            "format": "date-time"
           },
           "upload": {
             "$ref": "#/components/schemas/VideoUploadPlanDto"
@@ -1172,7 +1285,26 @@
       },
       "RequestPartUrlsDto": {
         "type": "object",
-        "properties": {}
+        "properties": {
+          "part_numbers": {
+            "description": "Numbers of the parts to sign (1-based, no duplicates). Each must not\nexceed the video's `part_count`.",
+            "example": [
+              1,
+              2,
+              3
+            ],
+            "uniqueItems": true,
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "number",
+              "minimum": 1
+            }
+          }
+        },
+        "required": [
+          "part_numbers"
+        ]
       },
       "PartUrlDto": {
         "type": "object",
@@ -1183,6 +1315,7 @@
           },
           "url": {
             "type": "string",
+            "description": "Presigned `UploadPart` URL; PUT the part bytes to it as-is.",
             "example": "https://storage.example.com/streamtube/videos/0b9e.../original?partNumber=1&uploadId=...&X-Amz-Signature=..."
           }
         },
@@ -1219,6 +1352,7 @@
           },
           "etag": {
             "type": "string",
+            "description": "`ETag` stored for the part; send it back when completing the upload.",
             "example": "\"9b2cf535f27731c974343645a3985328\""
           },
           "size_bytes": {
@@ -1236,6 +1370,7 @@
         "type": "object",
         "properties": {
           "parts": {
+            "description": "Parts already stored, ordered by `part_number`.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/UploadedPartDto"
@@ -1246,9 +1381,41 @@
           "parts"
         ]
       },
+      "CompletedPartDto": {
+        "type": "object",
+        "properties": {
+          "part_number": {
+            "type": "number",
+            "description": "Number of the uploaded part (1-based).",
+            "example": 1,
+            "minimum": 1
+          },
+          "etag": {
+            "type": "string",
+            "description": "Value of the `ETag` response header returned by the storage for the part.",
+            "example": "\\9b2cf535f27731c974343645a3985328\\"
+          }
+        },
+        "required": [
+          "part_number",
+          "etag"
+        ]
+      },
       "CompleteUploadDto": {
         "type": "object",
-        "properties": {}
+        "properties": {
+          "parts": {
+            "description": "Every uploaded part with the ETag the storage returned for it.",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompletedPartDto"
+            }
+          }
+        },
+        "required": [
+          "parts"
+        ]
       },
       "VideoResponseDto": {
         "type": "object",
@@ -1337,6 +1504,7 @@
           "thumbnail_url": {
             "type": "string",
             "nullable": true,
+            "description": "Presigned GET URL, present only once the thumbnail exists.",
             "example": null
           },
           "created_at": {
@@ -1345,8 +1513,8 @@
           },
           "processed_at": {
             "type": "string",
-            "format": "date-time",
-            "nullable": true
+            "nullable": true,
+            "format": "date-time"
           }
         },
         "required": [
